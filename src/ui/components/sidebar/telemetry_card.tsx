@@ -4,13 +4,17 @@ import { theme } from "../../theme.ts";
 
 export interface TelemetryCardProps {
   activeModel?: string | undefined;
+  /** Tokens currently in the context window. */
   tokensUsed?: number | undefined;
+  /** Cumulative tokens billed this session. */
+  sessionTokens?: number | undefined;
   maxTokens?: number | undefined;
 }
 
 export function TelemetryCard({
   activeModel,
   tokensUsed,
+  sessionTokens,
   maxTokens,
 }: TelemetryCardProps) {
   let modelName = activeModel || "Default Model";
@@ -55,11 +59,20 @@ export function TelemetryCard({
         {tokensUsed !== undefined && maxTokens !== undefined && maxTokens > 0 && (
           <>
             <box style={{ justifyContent: "space-between" }}>
-              <text style={{ fg: theme.textSecondary }}>Tokens Used:</text>
+              <text style={{ fg: theme.textSecondary }}>Context:</text>
               <text style={{ fg: theme.textPrimary }}>
                 <strong>{tokensUsed.toLocaleString()} / {Math.round(maxTokens / 1000)}k</strong>
               </text>
             </box>
+
+            {sessionTokens !== undefined && (
+              <box style={{ justifyContent: "space-between" }}>
+                <text style={{ fg: theme.textSecondary }}>Session Total:</text>
+                <text style={{ fg: theme.textPrimary }}>
+                  <strong>{sessionTokens.toLocaleString()}</strong>
+                </text>
+              </box>
+            )}
 
             <box style={{ justifyContent: "space-between" }}>
               <text style={{ fg: theme.textSecondary }}>Window Capacity:</text>

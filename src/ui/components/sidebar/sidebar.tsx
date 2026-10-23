@@ -29,7 +29,8 @@ export function Sidebar({
       <DatabaseCard databases={databases} sessionName={session?.title} />
       <TelemetryCard
         activeModel={activeModel}
-        tokensUsed={session?.session_token_used || 0}
+        tokensUsed={session?.context_tokens || 0}
+        sessionTokens={session?.session_token_used || 0}
         maxTokens={session?.session_token_limit || 0}
       />
     </box>

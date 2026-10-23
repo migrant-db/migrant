@@ -3,7 +3,6 @@ import { EventEmitter } from 'node:events';
 type AppEvent = "logout"
     | "login"
     | "workspace_change"
-    | "token-limit-breached"
     | "update-databases"
     | "update-session"
     | "update-model";

@@ -6,6 +6,8 @@ export interface IChatSessionsModel {
     title: string;
     session_token_used: number;
     session_token_limit: number;
+    /** Tokens currently occupying the context window (last step's input + output). */
+    context_tokens: number;
     created_at: string;
     updated_at: string;
 }
@@ -28,9 +30,13 @@ class TblChatSessions {
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
           );
         `);
+        // Migration for databases created before context_tokens existed.
+        try {
+            sqlClient.run('ALTER TABLE tbl_chat_sessions ADD COLUMN context_tokens BIGINT NOT NULL DEFAULT 0');
+        } catch { /* column already exists */ }
 
         this.chatSessionInsertStmt = sqlClient.prepare(
-            'INSERT OR REPLACE INTO tbl_chat_sessions (id, user_id, title,session_token_limit, session_token_used, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)'
+            'INSERT OR REPLACE INTO tbl_chat_sessions (id, user_id, title,session_token_limit, session_token_used, context_tokens, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)'
         );
         this.chatSessionSelectStmt = sqlClient.prepare(
             'SELECT * FROM tbl_chat_sessions WHERE user_id = ? order by updated_at desc'
@@ -50,6 +56,7 @@ class TblChatSessions {
             chatSession.title, 
             chatSession.session_token_limit, 
             chatSession.session_token_used, 
+            chatSession.context_tokens ?? 0,
             chatSession.created_at,
             chatSession.updated_at
         );

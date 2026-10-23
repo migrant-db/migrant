@@ -3,6 +3,18 @@ import z from "zod";
 import { pool } from "../../db/index.ts";
 import { validateGeneratedSql } from "../core/db_overview.ts";
 
+const MAX_ROWS = 100;
+const MAX_RESULT_CHARS = 20_000;
+
+/** Keep tool output small: it is re-sent to the model on every later step. */
+function capRows(rows: Record<string, unknown>[]) {
+    let kept = rows.slice(0, MAX_ROWS);
+    while (kept.length > 1 && JSON.stringify(kept).length > MAX_RESULT_CHARS) {
+        kept = kept.slice(0, Math.ceil(kept.length / 2));
+    }
+    return kept;
+}
+
 export const executeQueryTool = tool({
     description: `Execute a read-only SQL query against the connected database and return results to the user. 
     IMPORTANT: Only call this tool AFTER explicitly asking the user for permission.
@@ -30,11 +42,15 @@ export const executeQueryTool = tool({
 
         try {
             const result = await pool.query(dbId, validation.cleanSql);
+            const rows = capRows(result.rows);
             return {
                 status: "success",
                 rowCount: result.rowCount,
+                ...(rows.length < result.rows.length
+                    ? { truncated: true, note: `Only the first ${rows.length} of ${result.rows.length} rows are shown. Tell the user, and suggest a LIMIT or narrower query.` }
+                    : {}),
                 columns: result.fields.map(f => f.name),
-                rows: result.rows,
+                rows,
                 executedSql: validation.cleanSql,
             };
         } catch (err) {
