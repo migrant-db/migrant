@@ -1,4 +1,7 @@
 import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { tblChatMessage } from "./tbl_chat_message.ts";
 import { tblChatSessions } from "./tbl_chat_sessions.ts";
 import { tblDatabases } from "./tbl_databases.ts";
@@ -7,7 +10,10 @@ import { tblProvider } from "./tbl_provider.ts";
 import { tblSessionState } from "./tbl_session_state.ts";
 import { tblUserSession } from "./tbl_user_session.ts";
 
-export const sqlClient: Database = new Database('migrant.db');
+const dataDir = join(homedir(), ".migrant");
+mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+
+export const sqlClient: Database = new Database(join(dataDir, "migrant.db"));
 
 export function initializeDatabase() {
     tblChatMessage.initializeTblChatMessage();
