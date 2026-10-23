@@ -1,6 +1,7 @@
 
 import { appContext, type CommandContext, type CommandDefinition } from "../../domain/index.ts";
 import { pool } from "../../infrastructure/index.ts";
+import { emitEvent } from "../../utils/emitter.ts";
 import { getDbName } from "../../utils/db_helpers.ts";
 import { errorMessage, parseAndValidatePgUrl } from "./command_helpers.ts";
 
@@ -38,14 +39,30 @@ async function connectDb(args: string, ctx: CommandContext) {
 
   ctx.busy(`Connecting to ${dbName}...`);
 
-  let db;
+  let db: string | null = null;
   try {
     db = await pool.setConnection(normalizedUrl);
-    ctx.success(`Connected to ${dbName}`);
+    if (!db) {
+      throw new Error("Could not register the connection.");
+    }
+
+    ctx.busy(`Verifying ${dbName} responds to queries...`);
+    await pool.query(db, "SELECT 1");
   } catch (error) {
     if (db) {
       await pool.close(db);
+      emitEvent.emit("update-databases");
     }
-    throw new Error(`Connection failed: ${errorMessage(error)}`);
+    throw new Error(`Connection failed: ${errorMessage(error)}${connectionHint(error)}`);
   }
+
+  ctx.success(`Connected to ${dbName}`);
+}
+
+function connectionHint(error: unknown): string {
+  const code = (error as { code?: string })?.code;
+  if (code === "ENOTFOUND" || code === "ENETUNREACH" || code === "ETIMEDOUT" || code === "EHOSTUNREACH") {
+    return "\nHint: direct connection hosts can be IPv6-only. If your network lacks IPv6, use the pooler connection string instead.";
+  }
+  return "";
 }
