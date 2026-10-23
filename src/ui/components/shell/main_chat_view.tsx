@@ -133,7 +133,7 @@ export function MainChatView({
             />
           ) : null}
           {isCompact && runKind === "idle" && activePopup == null && (
-            <box style={{ flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1, marginBottom: 1, borderColor: theme.borderPrimary, paddingTop: 1 }}>
+            <box style={{ flexDirection: "row", justifyContent: "space-between", paddingLeft: 1, paddingRight: 1, borderColor: theme.borderPrimary }}>
               <text style={{ fg: theme.badgeModel }}>
                 {`[ Active DBs: ${databases?.length || 0} ] | [ Model: ${activeModel || "Unknown"} ] | [ Type /info ]`}
               </text>

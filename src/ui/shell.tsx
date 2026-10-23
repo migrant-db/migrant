@@ -1,4 +1,7 @@
 /** @jsxImportSource @opentui/react */
+import { useRenderer, useSelectionHandler } from "@opentui/react";
+import { useEffect, useRef, useState } from "react";
+import { copyToClipboard } from "./clipboard.ts";
 import { AuthCheckingView } from "./components/auth/auth_checking_view.tsx";
 import { LoginScreen } from "./components/auth/login_screen.tsx";
 import { HeroView } from "./components/shell/hero_view.tsx";
@@ -32,6 +35,21 @@ export function Shell({ onExit }: ShellProps) {
     auth,
     viewMode,
   } = useShell(onExit);
+
+  const renderer = useRenderer();
+  const [copiedChars, setCopiedChars] = useState<number | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  useSelectionHandler((selection) => {
+    const text = selection.getSelectedText();
+    if (!text.trim()) return;
+    void copyToClipboard(renderer, text).then((ok) => {
+      if (!ok) return;
+      setCopiedChars(text.length);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopiedChars(null), 1500);
+    });
+  });
 
 
   const availableWidth = Math.max(20, dimensions.width - 4);
@@ -69,6 +87,11 @@ export function Shell({ onExit }: ShellProps) {
         paddingBottom: 2,
       }}
     >
+      {copiedChars !== null && (
+        <box style={{ position: "absolute", top: 0, right: 2, backgroundColor: theme.borderPrimary, paddingLeft: 1, paddingRight: 1 }}>
+          <text style={{ fg: theme.brandLight }}>{`Copied ${copiedChars} chars`}</text>
+        </box>
+      )}
       {isHero ? (
         <HeroView
           activeModel={activeModel}
