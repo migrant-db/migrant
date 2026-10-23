@@ -2,9 +2,11 @@ import type { ModelMessage } from "ai";
 import { appContext } from "../../domain/index.ts";
 import { tblChatMessage, type IChatMessageModel } from "../../infrastructure/db/sqlite/tbl_chat_message.ts";
 import { getModelById } from "../../infrastructure/index.ts";
-import { emitEvent } from "../../utils/emitter.ts";
 
 export class ContextManager {
+    /** How many older messages the last getContext() call dropped to fit the budget. */
+    lastTrimmedCount = 0;
+
     calculateCostUsd(modelName: string, promptTokens: number, completionTokens: number): number {
         const modelConfig = getModelById(modelName);
         const inputPrice = modelConfig?.inputPer1M ?? 0.20;
@@ -36,7 +38,24 @@ export class ContextManager {
         return content;
     }
 
-    async getContext(userPrompt: string): Promise<ModelMessage[]> {
+    private normalizeRoles(messages: ModelMessage[]): ModelMessage[] {
+        const result: ModelMessage[] = [];
+        for (const msg of messages) {
+            const last = result[result.length - 1];
+            if (last && last.role === msg.role && typeof last.content === "string" && typeof msg.content === "string") {
+                last.content = `${last.content}\n\n${msg.content}`;
+            } else {
+                result.push({ ...msg });
+            }
+        }
+        while (result.length > 0 && result[0]!.role !== "user") {
+            result.shift();
+        }
+        return result;
+    }
+
+    async getContext(userPrompt: string, excludeMessageId?: string): Promise<ModelMessage[]> {
+        this.lastTrimmedCount = 0;
         const sessionId = appContext.currentChatSessionId;
         if (!sessionId) {
             return [{ role: 'user', content: userPrompt }];
@@ -52,7 +71,7 @@ export class ContextManager {
             }
 
             const validMessages = dbMessages.filter(
-                (msg: IChatMessageModel) => (msg.role === "user" || msg.role === "assistant") && msg.content !== userPrompt
+                (msg: IChatMessageModel) => (msg.role === "user" || msg.role === "assistant") && msg.id !== excludeMessageId
             );
             const selectedMessages: ModelMessage[] = [];
             let accumulatedTokens = this.estimateTokens(userPrompt);
@@ -65,13 +84,7 @@ export class ContextManager {
                     : msg.content;
                 const messageTokens = this.estimateTokens(content);
                 if (accumulatedTokens + messageTokens > maxHistoryTokenBudget && selectedMessages.length > 0) {
-                    emitEvent.emit('token-limit-breached', {
-                        sessionId: sessionId,
-                        current_token_budget: maxHistoryTokenBudget,
-                        current_token_used: accumulatedTokens,
-                        last_message: msg,
-                        token_overrun: accumulatedTokens + messageTokens - maxHistoryTokenBudget,
-                    });
+                    this.lastTrimmedCount = i + 1;
                     break;
                 }
                 accumulatedTokens += messageTokens;
@@ -82,9 +95,9 @@ export class ContextManager {
             }
             
             selectedMessages.push({ role: 'user', content: userPrompt });
-            return selectedMessages;
+            return this.normalizeRoles(selectedMessages);
         } catch (error) {
-            console.error("[ContextManager] Error constructing token-budgeted context:", error);
+            appContext.commandCtx?.log(`[ContextManager] Error constructing token-budgeted context: ${error}`);
             return [{ role: 'user', content: userPrompt }];
         }
     }

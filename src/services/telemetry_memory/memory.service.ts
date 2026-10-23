@@ -1,18 +1,23 @@
-import { type GenerateTextEndEvent, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
-import type { Context } from "node:vm";
 import { appContext } from "../../domain/index.ts";
 import type { IChatMessageModel, IChatSessionsModel } from "../../infrastructure/index.ts";
 import { getModelById, tblChatMessage, tblChatSessions } from "../../infrastructure/index.ts";
 import { emitEvent } from "../../utils/emitter.ts";
 
+export interface TurnResult {
+    text: string;
+    modelId: string;
+    provider: string;
+}
+
 export class MemoryService {
     async saveTurnToMemory(
-        response: GenerateTextEndEvent<NoInfer<ToolSet>, NoInfer<Context>>,
+        response: TurnResult,
         inputTokens: number,
         outputTokens: number,
         targetAgent?: string,
-        thoughtTime?: string
+        thoughtTime?: string,
+        contextTokens?: number
     ): Promise<IChatMessageModel | undefined> {
         try {
             const user = await appContext.services.authService.getCurrentUser();
@@ -24,7 +29,7 @@ export class MemoryService {
             const totalTokens = (promptTokens + completionTokens);
 
             const cost = appContext.services.contextManager.calculateCostUsd(
-                response.model.modelId,
+                response.modelId,
                 promptTokens,
                 completionTokens
             );
@@ -37,9 +42,9 @@ export class MemoryService {
                 user_id: user.id,
                 role: 'assistant',
                 content: response.text,
-                provider: response.model.provider,
-                model_name: response.model.modelId,
-                target_agent: targetAgent ?? response.model.modelId,
+                provider: response.provider,
+                model_name: response.modelId,
+                target_agent: targetAgent ?? response.modelId,
                 prompt_tokens: promptTokens,
                 completion_tokens: completionTokens,
                 total_tokens: totalTokens,
@@ -56,6 +61,7 @@ export class MemoryService {
                 const updatedSession = tblChatSessions.setChatSession({
                     ...currentSession,
                     session_token_used: sessionTotalTokensUsed,
+                    context_tokens: contextTokens ?? currentSession.context_tokens ?? 0,
                     updated_at: new Date().toISOString(),
                 });
 
@@ -65,7 +71,7 @@ export class MemoryService {
             }
             return assistantMessage;
         } catch (error) {
-            console.error("Error saving chat memory:", error);
+            appContext.commandCtx?.log(`Error saving chat memory: ${error}`);
             return undefined;
         }
     }
@@ -76,9 +82,8 @@ export class MemoryService {
 
         let sessionId = appContext.currentChatSessionId;
         if (!sessionId) {
-            // todays date and time
             const fallbackTitle = new Date().toLocaleString();
-            const tokenLimit = getModelById(appContext.selectedModel.modelId)?.contextWindow ?? 0;
+            const tokenLimit = getModelById(appContext.selectedModel.modelId ?? '')?.contextWindow ?? 0;
 
             const newSession: IChatSessionsModel = {
                 id: randomUUID(),
@@ -86,6 +91,7 @@ export class MemoryService {
                 title: fallbackTitle,
                 session_token_limit: tokenLimit,
                 session_token_used: 0,
+                context_tokens: 0,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             };

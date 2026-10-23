@@ -18,32 +18,37 @@ export async function runAgent(query: string, ctx: CommandContext): Promise<void
         indexStatus: db.indexStatus,
     }));
 
-    const sessionState = tblSessionState.getState(appContext.currentChatSessionId!);
-    const systemPrompt = buildSystemPromptWithContext(AGENT_SYSTEM_PROMPT, user, databases, sessionState);
-
     const userMessage = await appContext.services.memoryService.ensureActiveSession(query);
     if (userMessage && ctx.output) {
         ctx.output({ type: "user", content: userMessage });
     }
 
+    const sessionId = appContext.currentChatSessionId;
+    const sessionState = sessionId ? tblSessionState.getState(sessionId) : undefined;
+    const systemPrompt = buildSystemPromptWithContext(AGENT_SYSTEM_PROMPT, user, databases, sessionState);
+
     if (ctx.startAssistantStream) {
         ctx.startAssistantStream();
     }
 
-    const messages = await appContext.services.contextManager.getContext(query);
+    const messages = await appContext.services.contextManager.getContext(query, userMessage?.id);
+    if (appContext.services.contextManager.lastTrimmedCount > 0) {
+        ctx.log(`Context limit reached: ${appContext.services.contextManager.lastTrimmedCount} older message(s) left out of this request.`);
+    }
     const startTime = Date.now();
     let thoughtTimeStr = "";
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let contextTokens = 0;
     let malformedAttempts = 0;
     const MAX_MALFORMED = 3;
-    let finalResponse: any = {};
 
     let cumulativeText = "";
     let cumulativeReasoning = "";
 
-
     for (let step = 0; step < MAX_STEPS; step++) {
+        const abortController = new AbortController();
+        const stepStartLength = cumulativeText.length;
         const streamResult = streamText({
             model: appContext.providerSdk!(appContext.selectedModel.modelId!),
             system: systemPrompt,
@@ -51,9 +56,7 @@ export async function runAgent(query: string, ctx: CommandContext): Promise<void
             tools,
             toolChoice: "auto",
             maxOutputTokens: 2000,
-            onEnd(result) {
-                finalResponse = result;
-            },
+            abortSignal: abortController.signal,
             onError(_) { }
         });
 
@@ -64,12 +67,14 @@ export async function runAgent(query: string, ctx: CommandContext): Promise<void
                 if (chunk.type === "text-delta") {
                     cumulativeText += chunk.text;
                     ctx.updateAssistantStream?.({ text: cumulativeText, reasoning: cumulativeReasoning });
+
+                    const stepText = cumulativeText.slice(stepStartLength);
                     const leakedToolCall =
-                        cumulativeText.match(/<\|.*?\|>[\s\S]*?(?:<\|.*?\|>|$)/g) ||
-                        cumulativeText.match(/<tool_call>[\s\S]*?<\/tool_call>/gi) ||
-                        cumulativeText.match(/<function_calls>[\s\S]*?<\/function_calls>/gi) ||
-                        cumulativeText.match(/<invoke>[\s\S]*?<\/invoke>/gi) ||
-                        cumulativeText.match(/```json\s*\{\s*"tool"\s*:/gi);
+                        stepText.match(/<\|.*?\|>[\s\S]*?(?:<\|.*?\|>|$)/g) ||
+                        stepText.match(/<tool_call>[\s\S]*?<\/tool_call>/gi) ||
+                        stepText.match(/<function_calls>[\s\S]*?<\/function_calls>/gi) ||
+                        stepText.match(/<invoke>[\s\S]*?<\/invoke>/gi) ||
+                        stepText.match(/```json\s*\{\s*"tool"\s*:/gi);
 
                     if (leakedToolCall) {
                         malformedAttempts++;
@@ -78,11 +83,14 @@ export async function runAgent(query: string, ctx: CommandContext): Promise<void
                             return;
                         }
                         ctx.log("Repairing malformed tool call...");
-                        messages.push({ role: "assistant", content: cumulativeText });
+                        abortController.abort();
+                        messages.push({ role: "assistant", content: stepText });
                         messages.push({
                             role: "user",
                             content: "Your last response contained a malformed tool call. Use only the structured tool calling format, never raw XML or JSON tool calls in your text response."
                         });
+                        cumulativeText = cumulativeText.slice(0, stepStartLength);
+                        ctx.updateAssistantStream?.({ text: cumulativeText, reasoning: cumulativeReasoning });
                         isMalformed = true;
                         break;
                     }
@@ -92,6 +100,7 @@ export async function runAgent(query: string, ctx: CommandContext): Promise<void
                 }
             }
         } catch (error) {
+            if (isMalformed) continue;
             ctx.error(`Stream failed: ${(error as Error).message}`);
             return;
         }
@@ -106,6 +115,7 @@ export async function runAgent(query: string, ctx: CommandContext): Promise<void
 
         totalInputTokens += usage?.inputTokens ?? 0;
         totalOutputTokens += usage?.outputTokens ?? 0;
+        contextTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
 
         if (toolCalls && toolCalls.length > 0) {
             messages.push(...responseMessages);
@@ -125,11 +135,16 @@ export async function runAgent(query: string, ctx: CommandContext): Promise<void
         }
 
         const assistantMessage = await appContext.services.memoryService.saveTurnToMemory(
-            finalResponse,
+            {
+                text: cumulativeText,
+                modelId: appContext.selectedModel.modelId!,
+                provider: appContext.selectedModel.providerId ?? "unknown",
+            },
             totalInputTokens,
             totalOutputTokens,
             "agent",
             thoughtTimeStr,
+            contextTokens,
         );
 
         if (assistantMessage && ctx.replaceLastWithItem) {
