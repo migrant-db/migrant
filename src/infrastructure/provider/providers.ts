@@ -80,13 +80,16 @@ const deepseekModels = [
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', description: 'Best value', inputPer1M: 0.14, outputPer1M: 0.28, contextWindow: 1_000_000 },
 ];
 
+const withVendor = (vendor: string, models: ModelConfig[]): ModelConfig[] =>
+  models.map((m) => ({ ...m, id: `${vendor}/${m.id}` }));
+
 const openRouterModels = [
-  ...anthropicModels,
-  ...openAiModels,
-  ...googleModels,
-  ...xaiModels,
-  ...mistralModels,
-  ...deepseekModels,
+  ...withVendor('anthropic', anthropicModels),
+  ...withVendor('openai', openAiModels),
+  ...withVendor('google', googleModels),
+  ...withVendor('x-ai', xaiModels),
+  ...withVendor('mistralai', mistralModels),
+  ...withVendor('deepseek', deepseekModels),
   { id: 'cohere/north-mini-code:free', name: 'Cohere North Mini Code', description: 'Free Code model', inputPer1M: 0.00, outputPer1M: 0.00, contextWindow: 256_000 },
 ];
 

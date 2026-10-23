@@ -92,7 +92,7 @@ export const modelsCommand: CommandDefinition = {
       await generateText({
         model: testSdk(modelConfig.id),
         prompt: "test",
-        maxOutputTokens: 1,
+        maxOutputTokens: 16, // some providers (e.g. OpenAI) reject anything lower
       });
     } catch (err: any) {
       ctx.error(`API Key validation failed for ${providerConfig.name}: ${err?.message || err}`);

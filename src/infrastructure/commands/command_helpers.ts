@@ -32,6 +32,12 @@ export async function requireAuth(): Promise<void> {
   }
 }
 
+export function requireModel(): void {
+  if (!appContext.providerSdk || !appContext.selectedModel.modelId) {
+    throw new Error("No AI model selected. Run /models to choose a provider and add your API key.");
+  }
+}
+
 export async function runCommand(
   command: CommandDefinition,
   args: string,
